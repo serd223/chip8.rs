@@ -87,8 +87,8 @@ impl Chip8 {
             .copy_from_slice(program);
     }
 
-    /// delta is in seconds
-    pub fn frame(&mut self, delta: f32, keypress: Option<u8>) {
+    /// `delta` is in seconds
+    pub fn frame(&mut self, delta: f32, keypress: Option<u8>, random_source: impl FnOnce() -> u8) {
         if let Some(keypress) = keypress {
             self.keys[keypress as usize] = true;
         }
@@ -264,7 +264,7 @@ impl Chip8 {
                     // INST CXNN
                     let vx = &mut self.variable_reg[nibble_1 as usize];
                     let nn = (nibble_2 << 4) | (nibble_3);
-                    todo!("vx := random & NN")
+                    *vx = random_source() & nn;
                 }
                 0xD => {
                     // INST DXYN : sprite vx vy N
