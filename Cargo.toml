@@ -1,0 +1,8 @@
+[package]
+name = "chip8_interpreter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+framebrush = { git = "https://github.com/serd223/framebrush", version = "0.1.0", rev = "fe9364a2228ea8817c67a1ce1bbe5846ed4ddcee" }
+minifb = "0.28.0"
