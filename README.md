@@ -31,3 +31,11 @@ Or alternatively, you can add the following to your `Cargo.toml`:
 ```toml
   chip8 = { git = "https://github.com/serd223/chip8.rs"}
 ```
+
+# Resources
+These are the resources I used to learn about chip-8 itself and implement `chip8.rs`:
+ * https://chip-8.github.io/links/
+ * https://github.com/mattmikolay/chip-8/wiki/Mastering-CHIP%E2%80%908
+ * http://johnearnest.github.io/Octo/docs/chip8ref.pdf
+ * https://tobiasvl.github.io/blog/write-a-chip-8-emulator/
+ * https://github.com/kripod/chip8-roms
