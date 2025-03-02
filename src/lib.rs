@@ -21,7 +21,7 @@ impl Timer {
 }
 
 pub struct Chip8 {
-    pub framebuffer: [u8; Self::WIDTH * Self::HEIGHT],
+    pub framebuffer: [bool; Self::WIDTH * Self::HEIGHT],
     pub keys: [bool; 16],
     pc: usize,
     memory: [u8; Self::MEMORY_SIZE],
@@ -62,10 +62,10 @@ impl Chip8 {
 
     pub fn new() -> Self {
         let mut memory = [0; Self::MEMORY_SIZE];
-        memory[0x050..0x09F].copy_from_slice(&Self::DEFAULT_FONT);
+        memory[0x050..0x0A0].copy_from_slice(&Self::DEFAULT_FONT);
         assert!(memory[0x050] == 0xF0);
         Self {
-            framebuffer: [0; Self::WIDTH * Self::HEIGHT],
+            framebuffer: [false; Self::WIDTH * Self::HEIGHT],
             keys: [false; 16],
             pc: Self::PROGRAM_START,
             memory,
@@ -77,6 +77,10 @@ impl Chip8 {
             ds_timer: Timer::new(1.0),
             program_timer: Timer::new(1.0 / Self::INSTRUCTIONS_PER_SECOND as f32),
         }
+    }
+    pub fn set_program(&mut self, program: &[u8]) {
+        self.memory[Self::PROGRAM_START..Self::PROGRAM_START + program.len()]
+            .copy_from_slice(program);
     }
 
     /// delta is in seconds
@@ -98,84 +102,124 @@ impl Chip8 {
             self.pc += 2;
             match nibble_0 {
                 0x0 => {
-                    if nibble_2 == 0xE {
-                        if nibble_3 == 0xE {
-                            todo!("return")
-                        } else if nibble_3 == 0x0 {
-                            todo!("clear")
-                        } else {
-                            eprintln!(
-                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                nibble_0, nibble_1, nibble_2, nibble_3
-                            );
+                    if nibble_1 == 0x0 {
+                        if nibble_2 == 0xE {
+                            if nibble_3 == 0xE {
+                                // INST 00EE
+                                self.pc =
+                                    self.stack.pop().expect("Tried to return with empty stack.")
+                                        as usize;
+                            } else if nibble_3 == 0x0 {
+                                // INST 00E0 : clear
+                                self.framebuffer.fill(false);
+                            } else {
+                                eprintln!(
+                                    "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
+                                    nibble_0, nibble_1, nibble_2, nibble_3
+                                );
+                            }
                         }
+                    } else {
+                        eprintln!(
+                            "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
+                            nibble_0, nibble_1, nibble_2, nibble_3
+                        );
                     }
                 }
                 0x1 => {
+                    // INST 1NNN : jump NNN
                     let nnn =
-                        ((nibble_1 as u16) << 16) | ((nibble_2 as u16) << 8) | (nibble_3 as u16);
-                    todo!("jump NNN")
+                        ((nibble_1 as u16) << 8) | ((nibble_2 as u16) << 4) | (nibble_3 as u16);
+                    self.pc = nnn as usize;
                 }
                 0x2 => {
+                    // INST 2NNN
                     let nnn =
-                        ((nibble_1 as u16) << 16) | ((nibble_2 as u16) << 8) | (nibble_3 as u16);
-                    todo!("call subroutine NNN")
+                        ((nibble_1 as u16) << 8) | ((nibble_2 as u16) << 4) | (nibble_3 as u16);
+                    self.stack.push(self.pc as u16);
+                    self.pc = nnn as usize;
                 }
                 0x3 => {
+                    // INST 3XNN : if vx != NN then
                     let vx = self.variable_reg[nibble_1 as usize];
-                    let nn = ((nibble_2 << 4) | (nibble_3)) as u16;
-                    todo!("if vx != NN then")
+                    let nn = (nibble_2 << 4) | (nibble_3);
+                    if vx == nn {
+                        self.pc += 2;
+                    }
                 }
                 0x4 => {
+                    // INST 4XNN : if vx == NN then
                     let vx = self.variable_reg[nibble_1 as usize];
-                    let nn = ((nibble_2 << 4) | (nibble_3)) as u16;
-                    todo!("if vx == NN then")
+                    let nn = (nibble_2 << 4) | (nibble_3);
+                    if vx != nn {
+                        self.pc += 2;
+                    }
                 }
                 0x5 => {
+                    // INST 5XY0 : if vx != vy then
                     let vx = self.variable_reg[nibble_1 as usize];
                     let vy = self.variable_reg[nibble_2 as usize];
-                    todo!("if vx != vy then")
+                    if vx == vy {
+                        self.pc += 2;
+                    }
                 }
                 0x6 => {
+                    // INST 6XNN : vx := NN
                     let vx = &mut self.variable_reg[nibble_1 as usize];
-                    let nn = ((nibble_2 << 4) | (nibble_3)) as u16;
-                    todo!("vx := NN")
+                    let nn = (nibble_2 << 4) | (nibble_3);
+                    *vx = nn;
                 }
                 0x7 => {
+                    // INST 7XNN : vx += NN
                     let vx = &mut self.variable_reg[nibble_1 as usize];
-                    let nn = ((nibble_2 << 4) | (nibble_3)) as u16;
-                    todo!("vx += NN")
+                    let nn = (nibble_2 << 4) | (nibble_3);
+                    *vx += nn;
                 }
                 0x8 => {
-                    let vx = &mut self.variable_reg[nibble_1 as usize];
                     let vy = self.variable_reg[nibble_2 as usize];
+                    let vx = &mut self.variable_reg[nibble_1 as usize];
                     match nibble_3 {
                         0x0 => {
-                            todo!("vx := vy")
+                            // INST 8XY0 : vx := vy
+                            *vx = vy;
                         }
                         0x1 => {
-                            todo!("vx |= vy")
+                            // INST 8XY1 : vx |= vy
+                            *vx |= vy;
                         }
                         0x2 => {
-                            todo!("vx &= vy")
+                            // INST 8XY2 : vx &= vy
+                            *vx &= vy;
                         }
                         0x3 => {
-                            todo!("vx ^= vy")
+                            // INST 8XY3 : vx ^= vy
+                            *vx ^= vy;
                         }
                         0x4 => {
-                            todo!("vx += vy")
+                            // INST 8XY4 : vx += vy
+                            *vx += vy;
                         }
                         0x5 => {
-                            todo!("vx -= vy")
+                            // INST 8XY5 : vx -= vy
+                            *vx -= vy;
                         }
                         0x6 => {
-                            todo!("vx >>= vy")
+                            // INST 8XY6 : vx >>= vy
+                            self.variable_reg[0xF] = *vx & 0b1;
+                            let vx = &mut self.variable_reg[nibble_1 as usize];
+                            // LEGACY : Old interpreters would copy vy into vx before shifting
+                            *vx >>= 1;
                         }
                         0x7 => {
-                            todo!("vx =- vy")
+                            // INST 8XY7 : vx = vy - vx
+                            *vx = vy - *vx;
                         }
                         0xE => {
-                            todo!("vx <<= vy")
+                            // INST 8XYE : vx <<= vy
+                            self.variable_reg[0xF] = *vx & 0b10000000;
+                            let vx = &mut self.variable_reg[nibble_1 as usize];
+                            // LEGACY : Old interpreters would copy vy into vx before shifting
+                            *vx <<= 1;
                         }
                         _ => {
                             eprintln!(
@@ -186,36 +230,72 @@ impl Chip8 {
                     }
                 }
                 0x9 => {
+                    // INST 9XY0 : if vx == vy then
                     let vx = self.variable_reg[nibble_1 as usize];
                     let vy = self.variable_reg[nibble_2 as usize];
-                    todo!("if vx == vy then")
+                    if vx != vy {
+                        self.pc += 2;
+                    }
                 }
                 0xA => {
+                    // INST ANNN : index_reg := NNN
                     let nnn =
-                        ((nibble_1 as u16) << 16) | ((nibble_2 as u16) << 8) | (nibble_3 as u16);
-                    todo!("index_reg := NNN")
+                        ((nibble_1 as u16) << 8) | ((nibble_2 as u16) << 4) | (nibble_3 as u16);
+                    self.index_reg = nnn;
                 }
                 0xB => {
+                    // INST BNNN
                     let nnn =
-                        ((nibble_1 as u16) << 16) | ((nibble_2 as u16) << 8) | (nibble_3 as u16);
+                        ((nibble_1 as u16) << 8) | ((nibble_2 as u16) << 4) | (nibble_3 as u16);
                     todo!("jump NNN + v0")
                 }
                 0xC => {
+                    // INST CXNN
                     let vx = &mut self.variable_reg[nibble_1 as usize];
-                    let nn = ((nibble_2 << 4) | (nibble_3)) as u16;
+                    let nn = (nibble_2 << 4) | (nibble_3);
                     todo!("vx := random & NN")
                 }
                 0xD => {
+                    // INST DXYN : sprite vx vy N
                     let vx = self.variable_reg[nibble_1 as usize];
                     let vy = self.variable_reg[nibble_2 as usize];
                     let n = nibble_3 as u16;
-                    todo!("sprite vx vy N")
+
+                    let x = vx as usize % Self::WIDTH;
+                    let mut y = vy as usize % Self::HEIGHT;
+                    self.variable_reg[0xF] = 0;
+                    for i in 0..n {
+                        let data = self.memory[(self.index_reg + i) as usize];
+                        let mut x = x;
+                        for j in 0..8 {
+                            let data_bit = ((0b10000000 >> j) & data) > 0;
+                            let current_pixel = &mut self.framebuffer[y * Self::WIDTH + x];
+                            if data_bit {
+                                if *current_pixel {
+                                    *current_pixel = false;
+                                    self.variable_reg[0xF] = 1;
+                                } else {
+                                    *current_pixel = true;
+                                }
+                            }
+                            x += 1;
+                            if x >= Self::WIDTH {
+                                break;
+                            }
+                        }
+                        y += 1;
+                        if y >= Self::HEIGHT {
+                            break;
+                        }
+                    }
                 }
                 0xE => {
                     let vx = self.variable_reg[nibble_1 as usize];
                     if nibble_2 == 0x9 && nibble_3 == 0xE {
+                        // INST EX9E
                         todo!("if key = vx not pressed then")
                     } else if nibble_2 == 0xA && nibble_3 == 0x1 {
+                        // INST EXA1
                         todo!("if key = vx is pressed then")
                     } else {
                         eprintln!(
@@ -228,8 +308,10 @@ impl Chip8 {
                     let vx = &mut self.variable_reg[nibble_1 as usize];
                     if nibble_2 == 0x0 {
                         if nibble_3 == 0x7 {
+                            // INST FX07
                             todo!("vx := delay")
                         } else if nibble_3 == 0xA {
+                            // INST FX0A
                             todo!("vx := key")
                         } else {
                             eprintln!(
@@ -239,10 +321,13 @@ impl Chip8 {
                         }
                     } else if nibble_2 == 0x1 {
                         if nibble_3 == 0x5 {
+                            // INST FX15
                             todo!("delay := vx")
                         } else if nibble_3 == 0x8 {
+                            // INST FX18
                             todo!("sound := vx")
                         } else if nibble_3 == 0xE {
+                            // INST FX1E
                             todo!("index_reg += vx")
                         } else {
                             eprintln!(
@@ -251,17 +336,27 @@ impl Chip8 {
                             );
                         }
                     } else if nibble_2 == 0x2 && nibble_3 == 0x9 {
+                        // INST FX29
                         let vx = self.variable_reg[nibble_1 as usize];
                         todo!("index_reg := hex vx")
                     } else if nibble_2 == 0x3 && nibble_3 == 0x3 {
+                        // INST FX33 : bcd vx // Decode vx into binary-coded decimal
                         let vx = self.variable_reg[nibble_1 as usize];
-                        todo!("bcd vx // Decode vx into binary-coded decimal")
+                        self.memory[self.index_reg as usize] = vx / 100;
+                        self.memory[self.index_reg as usize + 1] = (vx / 10) % 10;
+                        self.memory[self.index_reg as usize + 2] = (vx % 100) % 10;
                     } else if nibble_2 == 0x5 && nibble_3 == 0x5 {
-                        let vx = self.variable_reg[nibble_1 as usize];
-                        todo!("save vx // Save v0-vx to i through (i+x)")
+                        // INST FX55 : save vx // Save v0-vx to index_reg through (index_reg+x)
+                        // LEGACY : Old interpreters used to increment the index register along the way.
+                        for x in 0..=nibble_1 as usize {
+                            self.memory[self.index_reg as usize + x] = self.variable_reg[x];
+                        }
                     } else if nibble_2 == 0x6 && nibble_3 == 0x5 {
-                        let vx = &mut self.variable_reg[nibble_1 as usize];
-                        todo!("load vx // Load v0-vx from i through (i+x)")
+                        // INST FX65 : load vx // Load v0-vx from index_reg through (index_reg+x)
+                        // LEGACY : Old interpreters used to increment the index register along the way.
+                        for x in 0..=nibble_1 as usize {
+                            self.variable_reg[x] = self.memory[self.index_reg as usize + x];
+                        }
                     } else {
                         eprintln!(
                             "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
