@@ -42,7 +42,7 @@ fn main() {
         let (width, height) = window.get_size();
         buf.resize(width * height, 0);
 
-        chip8.frame(delta);
+        chip8.frame(delta, None);
 
         // Begin drawing
         let mut canvas = Canvas::new(&mut buf, (width, height), (Chip8::WIDTH, Chip8::HEIGHT));

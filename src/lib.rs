@@ -27,8 +27,8 @@ pub struct Chip8 {
     memory: [u8; Self::MEMORY_SIZE],
     index_reg: u16,
     stack: Vec<u16>,
-    delay_timer: u16,
-    sound_timer: u16,
+    delay_timer: u8,
+    sound_timer: u8,
     ds_timer: Timer, // delay-sound timer
     program_timer: Timer,
     variable_reg: [u8; 16],
@@ -40,7 +40,9 @@ impl Chip8 {
     /// In bytes
     pub const MEMORY_SIZE: usize = 4096;
     pub const PROGRAM_START: usize = 0x200;
-    pub const DEFAULT_FONT: [u8; 80] = [
+    /// In bytes
+    pub const FONT_CHAR_SIZE: usize = 5;
+    pub const DEFAULT_FONT: [u8; Self::FONT_CHAR_SIZE * 16] = [
         0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
         0x20, 0x60, 0x20, 0x20, 0x70, // 1
         0xF0, 0x10, 0xF0, 0x80, 0xF0, // 2
@@ -58,11 +60,13 @@ impl Chip8 {
         0xF0, 0x80, 0xF0, 0x80, 0xF0, // E
         0xF0, 0x80, 0xF0, 0x80, 0x80, // F
     ];
+    pub const FONT_START: usize = 0x050;
     pub const INSTRUCTIONS_PER_SECOND: usize = 700;
 
     pub fn new() -> Self {
         let mut memory = [0; Self::MEMORY_SIZE];
-        memory[0x050..0x0A0].copy_from_slice(&Self::DEFAULT_FONT);
+        memory[Self::FONT_START..Self::FONT_START + Self::DEFAULT_FONT.len()]
+            .copy_from_slice(&Self::DEFAULT_FONT);
         assert!(memory[0x050] == 0xF0);
         Self {
             framebuffer: [false; Self::WIDTH * Self::HEIGHT],
@@ -84,7 +88,10 @@ impl Chip8 {
     }
 
     /// delta is in seconds
-    pub fn frame(&mut self, delta: f32) {
+    pub fn frame(&mut self, delta: f32, keypress: Option<u8>) {
+        if let Some(keypress) = keypress {
+            self.keys[keypress as usize] = true;
+        }
         if self.ds_timer.check(delta) {
             if self.delay_timer > 0 {
                 self.delay_timer -= 1;
@@ -117,6 +124,7 @@ impl Chip8 {
                                     "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
                                     nibble_0, nibble_1, nibble_2, nibble_3
                                 );
+                                return;
                             }
                         }
                     } else {
@@ -124,6 +132,7 @@ impl Chip8 {
                             "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
                             nibble_0, nibble_1, nibble_2, nibble_3
                         );
+                        return;
                     }
                 }
                 0x1 => {
@@ -226,6 +235,7 @@ impl Chip8 {
                                 "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
                                 nibble_0, nibble_1, nibble_2, nibble_3
                             );
+                            return;
                         }
                     }
                 }
@@ -244,10 +254,11 @@ impl Chip8 {
                     self.index_reg = nnn;
                 }
                 0xB => {
-                    // INST BNNN
+                    // INST BNNN : jump NNN + v0
                     let nnn =
                         ((nibble_1 as u16) << 8) | ((nibble_2 as u16) << 4) | (nibble_3 as u16);
-                    todo!("jump NNN + v0")
+                    let v0 = self.variable_reg[0x0] as u16;
+                    self.pc = (nnn + v0) as usize;
                 }
                 0xC => {
                     // INST CXNN
@@ -291,28 +302,41 @@ impl Chip8 {
                 }
                 0xE => {
                     let vx = self.variable_reg[nibble_1 as usize];
-                    if nibble_2 == 0x9 && nibble_3 == 0xE {
-                        // INST EX9E
-                        todo!("if key = vx not pressed then")
-                    } else if nibble_2 == 0xA && nibble_3 == 0x1 {
-                        // INST EXA1
-                        todo!("if key = vx is pressed then")
+                    if vx < self.keys.len() as u8 {
+                        if nibble_2 == 0x9 && nibble_3 == 0xE {
+                            // INST EX9E : if key = vx not pressed then
+                            if self.keys[vx as usize] {
+                                self.pc += 2;
+                            }
+                        } else if nibble_2 == 0xA && nibble_3 == 0x1 {
+                            // INST EXA1 : if key = vx is pressed then
+                            if !self.keys[vx as usize] {
+                                self.pc += 2;
+                            }
+                        } else {
+                            eprintln!(
+                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
+                                nibble_0, nibble_1, nibble_2, nibble_3
+                            );
+                            return;
+                        }
                     } else {
-                        eprintln!(
-                            "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                            nibble_0, nibble_1, nibble_2, nibble_3
-                        );
+                        eprintln!("[WARN] Tried to check whether key {vx} is pressed but max value of key is {}.", self.keys.len())
                     }
                 }
                 0xF => {
                     let vx = &mut self.variable_reg[nibble_1 as usize];
                     if nibble_2 == 0x0 {
                         if nibble_3 == 0x7 {
-                            // INST FX07
-                            todo!("vx := delay")
+                            // INST FX07 : vx := delay
+                            *vx = self.delay_timer;
                         } else if nibble_3 == 0xA {
-                            // INST FX0A
-                            todo!("vx := key")
+                            // INST FX0A : vx := key // Wait for a keypress
+                            if let Some(keypress) = keypress {
+                                *vx = keypress;
+                            } else {
+                                self.pc -= 2; // wait
+                            }
                         } else {
                             eprintln!(
                                 "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
@@ -321,14 +345,16 @@ impl Chip8 {
                         }
                     } else if nibble_2 == 0x1 {
                         if nibble_3 == 0x5 {
-                            // INST FX15
-                            todo!("delay := vx")
+                            // INST FX15 : delay := vx
+                            self.delay_timer = *vx;
                         } else if nibble_3 == 0x8 {
-                            // INST FX18
-                            todo!("sound := vx")
+                            // INST FX18 : sound := vx
+                            self.sound_timer = *vx;
                         } else if nibble_3 == 0xE {
-                            // INST FX1E
-                            todo!("index_reg += vx")
+                            // INST FX1E : index_reg += vx
+                            // LEGACY : The interpreter for Amiga would treat index_reg going above 0x0FFF as a special overflow and would set vf := 1 in that case
+                            // The game called "Spacefight 2091!" relies on this.
+                            self.index_reg += *vx as u16;
                         } else {
                             eprintln!(
                                 "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
@@ -336,9 +362,10 @@ impl Chip8 {
                             );
                         }
                     } else if nibble_2 == 0x2 && nibble_3 == 0x9 {
-                        // INST FX29
+                        // INST FX29 : index_reg := hex vx
                         let vx = self.variable_reg[nibble_1 as usize];
-                        todo!("index_reg := hex vx")
+                        let ch = (vx & 0b00001111) as u16;
+                        self.index_reg = Self::FONT_START as u16 + ch * Self::FONT_CHAR_SIZE as u16;
                     } else if nibble_2 == 0x3 && nibble_3 == 0x3 {
                         // INST FX33 : bcd vx // Decode vx into binary-coded decimal
                         let vx = self.variable_reg[nibble_1 as usize];
