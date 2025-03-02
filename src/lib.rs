@@ -1,18 +1,18 @@
 pub struct Timer {
-    raw: f32,
-    length: f32,
+    raw: u128,
+    length: u128,
 }
 
 impl Timer {
-    /// Length is in seconds
-    pub fn new(length: f32) -> Self {
-        Self { raw: 0., length }
+    /// Length is in microseconds
+    pub fn new(length: u128) -> Self {
+        Self { raw: 0, length }
     }
-    pub fn check(&mut self, delta: f32) -> bool {
+    pub fn check(&mut self, delta: u128) -> bool {
         self.raw += delta;
 
         if self.raw >= self.length {
-            self.raw = 0.0;
+            self.raw = 0;
             true
         } else {
             false
@@ -36,15 +36,15 @@ pub struct Chip8 {
 }
 
 pub struct Chip8Config {
-    instructions_per_second: usize,
-    program_start: usize,
-    font: [u8; Self::FONT_CHAR_SIZE * 16],
-    font_start: usize,
+    pub instructions_per_second: usize,
+    pub program_start: usize,
+    pub font: [u8; Self::FONT_CHAR_SIZE * 16],
+    pub font_start: usize,
 
     // Backwards-compat flags
-    copy_vy_while_shifting: bool,
-    increment_index_during_save_load: bool,
-    index_overflow_flag: bool,
+    pub copy_vy_while_shifting: bool,
+    pub increment_index_during_save_load: bool,
+    pub index_overflow_flag: bool,
 }
 impl Default for Chip8Config {
     fn default() -> Self {
@@ -107,8 +107,8 @@ impl Chip8 {
             delay_timer: 0,
             sound_timer: 0,
             variable_reg: [0; 16],
-            ds_timer: Timer::new(1.0),
-            program_timer: Timer::new(1.0 / config.instructions_per_second as f32),
+            ds_timer: Timer::new(1_000_000 / 60),
+            program_timer: Timer::new(1_000_000 / config.instructions_per_second as u128),
             config,
         }
     }
@@ -121,8 +121,8 @@ impl Chip8 {
         self.sound_timer > 0
     }
 
-    /// `delta` is in seconds
-    pub fn frame(&mut self, delta: f32, keypress: Option<u8>, random_source: impl FnOnce() -> u8) {
+    /// `delta` is in microseconds
+    pub fn frame(&mut self, delta: u128, keypress: Option<u8>, random_source: impl FnOnce() -> u8) {
         if let Some(keypress) = keypress {
             self.keys[keypress as usize] = true;
         }
@@ -160,6 +160,12 @@ impl Chip8 {
                                 );
                                 return;
                             }
+                        } else {
+                            eprintln!(
+                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
+                                nibble_0, nibble_1, nibble_2, nibble_3
+                            );
+                            return;
                         }
                     } else {
                         eprintln!(
