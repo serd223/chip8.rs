@@ -1,3 +1,5 @@
+#![no_std]
+
 pub struct Timer {
     raw: u128,
     length: u128,
@@ -19,21 +21,57 @@ impl Timer {
         }
     }
 }
-
-pub struct Chip8 {
-    pub framebuffer: [bool; Self::WIDTH * Self::HEIGHT],
-    pub keys: [bool; 16],
-    pc: usize,
-    memory: [u8; Self::MEMORY_SIZE],
-    index_reg: u16,
-    stack: Vec<u16>,
-    delay_timer: u8,
-    sound_timer: u8,
-    ds_timer: Timer, // delay-sound timer
-    program_timer: Timer,
-    variable_reg: [u8; 16],
-    config: Chip8Config,
+#[derive(Debug)]
+pub enum Chip8Error {
+    InvalidInstruction {
+        pc: usize,
+        nibble_0: u8,
+        nibble_1: u8,
+        nibble_2: u8,
+        nibble_3: u8,
+    },
+    PopEmptyStack {
+        pc: usize,
+        nibble_0: u8,
+        nibble_1: u8,
+        nibble_2: u8,
+        nibble_3: u8,
+    },
 }
+impl core::fmt::Display for Chip8Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Chip8Error::InvalidInstruction {
+                pc,
+                nibble_0,
+                nibble_1,
+                nibble_2,
+                nibble_3,
+            } => {
+                write!(
+                    f,
+                    "[pc = {:0>3X}]; Illegal instruction: {:0>1X}{:0>1X}{:0>1X}{:0>1X}",
+                    pc, nibble_0, nibble_1, nibble_2, nibble_3
+                )
+            }
+            Chip8Error::PopEmptyStack {
+                pc,
+                nibble_0,
+                nibble_1,
+                nibble_2,
+                nibble_3,
+            } => {
+                write!(
+                    f,
+                    "[pc = {:0>3X}]; Tried to pop an empty stack: {:0>1X}{:0>1X}{:0>1X}{:0>1X}",
+                    pc, nibble_0, nibble_1, nibble_2, nibble_3
+                )
+            }
+        }
+    }
+}
+
+impl core::error::Error for Chip8Error {}
 
 pub struct Chip8Config {
     pub instructions_per_second: usize,
@@ -86,11 +124,29 @@ impl Chip8Config {
     pub const FONT_START: usize = 0x050;
 }
 
+pub struct Chip8 {
+    pub framebuffer: [bool; Self::WIDTH * Self::HEIGHT],
+    pub keys: [bool; 16],
+    pc: usize,
+    memory: [u8; Self::MEMORY_SIZE],
+    index_reg: u16,
+    stack: [u16; Self::STACK_SIZE / 2],
+    stack_len: usize,
+    delay_timer: u8,
+    sound_timer: u8,
+    ds_timer: Timer, // delay-sound timer
+    program_timer: Timer,
+    variable_reg: [u8; 16],
+    config: Chip8Config,
+}
+
 impl Chip8 {
     pub const WIDTH: usize = 64;
     pub const HEIGHT: usize = 32;
     /// In bytes
     pub const MEMORY_SIZE: usize = 4096;
+    /// In bytes
+    pub const STACK_SIZE: usize = 2048;
 
     pub fn new(config: Chip8Config) -> Self {
         let mut memory = [0; Self::MEMORY_SIZE];
@@ -103,7 +159,8 @@ impl Chip8 {
             pc: config.program_start,
             memory,
             index_reg: 0,
-            stack: Vec::new(),
+            stack: [0; Self::STACK_SIZE / 2],
+            stack_len: 0,
             delay_timer: 0,
             sound_timer: 0,
             variable_reg: [0; 16],
@@ -122,7 +179,12 @@ impl Chip8 {
     }
 
     /// `delta` is in microseconds
-    pub fn frame(&mut self, delta: u128, keypress: Option<u8>, random_source: impl FnOnce() -> u8) {
+    pub fn frame(
+        &mut self,
+        delta: u128,
+        keypress: Option<u8>,
+        random_source: impl FnOnce() -> u8,
+    ) -> Result<(), Chip8Error> {
         if let Some(keypress) = keypress {
             self.keys[keypress as usize] = true;
         }
@@ -147,32 +209,46 @@ impl Chip8 {
                         if nibble_2 == 0xE {
                             if nibble_3 == 0xE {
                                 // INST 00EE
-                                self.pc =
-                                    self.stack.pop().expect("Tried to return with empty stack.")
-                                        as usize;
+                                if self.stack_len == 0 {
+                                    return Err(Chip8Error::PopEmptyStack {
+                                        pc: self.pc - 2,
+                                        nibble_0,
+                                        nibble_1,
+                                        nibble_2,
+                                        nibble_3,
+                                    });
+                                }
+                                self.pc = self.stack[self.stack_len - 1] as usize;
+                                self.stack_len -= 1;
                             } else if nibble_3 == 0x0 {
                                 // INST 00E0 : clear
                                 self.framebuffer.fill(false);
                             } else {
-                                eprintln!(
-                                    "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                    nibble_0, nibble_1, nibble_2, nibble_3
-                                );
-                                return;
+                                return Err(Chip8Error::InvalidInstruction {
+                                    pc: self.pc - 2,
+                                    nibble_0,
+                                    nibble_1,
+                                    nibble_2,
+                                    nibble_3,
+                                });
                             }
                         } else {
-                            eprintln!(
-                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                nibble_0, nibble_1, nibble_2, nibble_3
-                            );
-                            return;
+                            return Err(Chip8Error::InvalidInstruction {
+                                pc: self.pc - 2,
+                                nibble_0,
+                                nibble_1,
+                                nibble_2,
+                                nibble_3,
+                            });
                         }
                     } else {
-                        eprintln!(
-                            "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                            nibble_0, nibble_1, nibble_2, nibble_3
-                        );
-                        return;
+                        return Err(Chip8Error::InvalidInstruction {
+                            pc: self.pc - 2,
+                            nibble_0,
+                            nibble_1,
+                            nibble_2,
+                            nibble_3,
+                        });
                     }
                 }
                 0x1 => {
@@ -185,7 +261,8 @@ impl Chip8 {
                     // INST 2NNN
                     let nnn =
                         ((nibble_1 as u16) << 8) | ((nibble_2 as u16) << 4) | (nibble_3 as u16);
-                    self.stack.push(self.pc as u16);
+                    self.stack[self.stack_len] = self.pc as u16;
+                    self.stack_len += 1;
                     self.pc = nnn as usize;
                 }
                 0x3 => {
@@ -285,11 +362,13 @@ impl Chip8 {
                             }
                         }
                         _ => {
-                            eprintln!(
-                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                nibble_0, nibble_1, nibble_2, nibble_3
-                            );
-                            return;
+                            return Err(Chip8Error::InvalidInstruction {
+                                pc: self.pc - 2,
+                                nibble_0,
+                                nibble_1,
+                                nibble_2,
+                                nibble_3,
+                            });
                         }
                     }
                 }
@@ -368,14 +447,16 @@ impl Chip8 {
                                 self.pc += 2;
                             }
                         } else {
-                            eprintln!(
-                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                nibble_0, nibble_1, nibble_2, nibble_3
-                            );
-                            return;
+                            return Err(Chip8Error::InvalidInstruction {
+                                pc: self.pc - 2,
+                                nibble_0,
+                                nibble_1,
+                                nibble_2,
+                                nibble_3,
+                            });
                         }
                     } else {
-                        eprintln!("[WARN] Tried to check whether key {vx} is pressed but max value of key is {}.", self.keys.len())
+                        // eprintln!("[WARN] Tried to check whether key {vx} is pressed but max value of key is {}.", self.keys.len())
                     }
                 }
                 0xF => {
@@ -392,10 +473,13 @@ impl Chip8 {
                                 self.pc -= 2; // wait
                             }
                         } else {
-                            eprintln!(
-                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                nibble_0, nibble_1, nibble_2, nibble_3
-                            );
+                            return Err(Chip8Error::InvalidInstruction {
+                                pc: self.pc - 2,
+                                nibble_0,
+                                nibble_1,
+                                nibble_2,
+                                nibble_3,
+                            });
                         }
                     } else if nibble_2 == 0x1 {
                         if nibble_3 == 0x5 {
@@ -415,10 +499,13 @@ impl Chip8 {
                                 }
                             }
                         } else {
-                            eprintln!(
-                                "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                                nibble_0, nibble_1, nibble_2, nibble_3
-                            );
+                            return Err(Chip8Error::InvalidInstruction {
+                                pc: self.pc - 2,
+                                nibble_0,
+                                nibble_1,
+                                nibble_2,
+                                nibble_3,
+                            });
                         }
                     } else if nibble_2 == 0x2 && nibble_3 == 0x9 {
                         // INST FX29 : index_reg := hex vx
@@ -455,19 +542,26 @@ impl Chip8 {
                             }
                         }
                     } else {
-                        eprintln!(
-                            "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                            nibble_0, nibble_1, nibble_2, nibble_3
-                        );
+                        return Err(Chip8Error::InvalidInstruction {
+                            pc: self.pc - 2,
+                            nibble_0,
+                            nibble_1,
+                            nibble_2,
+                            nibble_3,
+                        });
                     }
                 }
                 _ => {
-                    eprintln!(
-                        "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
-                        nibble_0, nibble_1, nibble_2, nibble_3
-                    );
+                    return Err(Chip8Error::InvalidInstruction {
+                        pc: self.pc - 2,
+                        nibble_0,
+                        nibble_1,
+                        nibble_2,
+                        nibble_3,
+                    });
                 }
             }
         }
+        Ok(())
     }
 }

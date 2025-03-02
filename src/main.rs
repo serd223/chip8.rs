@@ -1,4 +1,4 @@
-use chip8::{Chip8, Chip8Config};
+use chip8::{Chip8, Chip8Config, Chip8Error};
 use framebrush::{Canvas, RGBu32, WHITE};
 use minifb::{Key, Window, WindowOptions};
 use std::time::{Instant, UNIX_EPOCH};
@@ -6,7 +6,7 @@ use std::time::{Instant, UNIX_EPOCH};
 const DEFAULT_WIDTH: usize = 800;
 const DEFAULT_HEIGHT: usize = 600;
 
-fn main() {
+fn main() -> Result<(), Chip8Error> {
     let mut buf = vec![0; DEFAULT_WIDTH * DEFAULT_HEIGHT];
     let mut chip8 = Chip8::new(Chip8Config {
         instructions_per_second: 500_000,
@@ -19,7 +19,7 @@ fn main() {
             p
         } else {
             eprintln!("Usage: {program} <rom path>");
-            return;
+            return Ok(());
         }
     };
     let program = std::fs::read(&file_path).expect("file not found");
@@ -84,7 +84,7 @@ fn main() {
 
         chip8.frame(delta, keypress, || {
             (UNIX_EPOCH.elapsed().unwrap().as_micros() % 255) as u8
-        });
+        })?;
 
         // Begin drawing
         let mut canvas = Canvas::new(&mut buf, (width, height), (Chip8::WIDTH, Chip8::HEIGHT));
@@ -102,4 +102,5 @@ fn main() {
         // End drawing
         window.update_with_buffer(&buf, width, height).unwrap();
     }
+    Ok(())
 }
