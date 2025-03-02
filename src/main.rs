@@ -1,4 +1,4 @@
-use chip8::{Chip8, Chip8Config, Chip8Error};
+use chip8::{Chip8, Chip8Error};
 use framebrush::{Canvas, RGBu32, WHITE};
 use minifb::{Key, Window, WindowOptions};
 use std::time::{Instant, UNIX_EPOCH};
@@ -8,10 +8,8 @@ const DEFAULT_HEIGHT: usize = 600;
 
 fn main() -> Result<(), Chip8Error> {
     let mut buf = vec![0; DEFAULT_WIDTH * DEFAULT_HEIGHT];
-    let mut chip8 = Chip8::new(Chip8Config {
-        instructions_per_second: 500_000,
-        ..Default::default()
-    });
+    let mut chip8 = Chip8::new(Default::default());
+
     let file_path = {
         let mut args = std::env::args();
         let program = args.next().unwrap();
