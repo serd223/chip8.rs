@@ -38,7 +38,7 @@ pub struct Chip8 {
 pub struct Chip8Config {
     instructions_per_second: usize,
     program_start: usize,
-    default_font: [u8; Self::FONT_CHAR_SIZE * 16],
+    font: [u8; Self::FONT_CHAR_SIZE * 16],
     font_start: usize,
 
     // Backwards-compat flags
@@ -51,7 +51,7 @@ impl Default for Chip8Config {
         Self {
             instructions_per_second: Self::INSTRUCTIONS_PER_SECOND,
             program_start: Self::PROGRAM_START,
-            default_font: Self::DEFAULT_FONT,
+            font: Self::DEFAULT_FONT,
             font_start: Self::FONT_START,
             copy_vy_while_shifting: false,
             increment_index_during_save_load: false,
@@ -94,8 +94,8 @@ impl Chip8 {
 
     pub fn new(config: Chip8Config) -> Self {
         let mut memory = [0; Self::MEMORY_SIZE];
-        memory[config.font_start..config.font_start + config.default_font.len()]
-            .copy_from_slice(&config.default_font);
+        memory[config.font_start..config.font_start + config.font.len()]
+            .copy_from_slice(&config.font);
         assert!(memory[0x050] == 0xF0);
         Self {
             framebuffer: [false; Self::WIDTH * Self::HEIGHT],
