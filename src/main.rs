@@ -8,7 +8,7 @@ const DEFAULT_HEIGHT: usize = 600;
 
 fn main() {
     let mut buf = vec![0; DEFAULT_WIDTH * DEFAULT_HEIGHT];
-    let mut chip8 = Chip8::new();
+    let mut chip8 = Chip8::new(Default::default());
     let file_path = {
         let mut args = std::env::args();
         let program = args.next().unwrap();
@@ -74,6 +74,11 @@ fn main() {
             }
             res
         };
+
+        if chip8.should_play_sound() {
+            // TODO: Play sound here
+        }
+
         chip8.frame(delta, keypress, || {
             (UNIX_EPOCH.elapsed().unwrap().as_micros() % 255) as u8
         });

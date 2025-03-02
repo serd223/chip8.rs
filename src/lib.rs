@@ -32,13 +32,36 @@ pub struct Chip8 {
     ds_timer: Timer, // delay-sound timer
     program_timer: Timer,
     variable_reg: [u8; 16],
+    config: Chip8Config,
 }
 
-impl Chip8 {
-    pub const WIDTH: usize = 64;
-    pub const HEIGHT: usize = 32;
-    /// In bytes
-    pub const MEMORY_SIZE: usize = 4096;
+pub struct Chip8Config {
+    instructions_per_second: usize,
+    program_start: usize,
+    default_font: [u8; Self::FONT_CHAR_SIZE * 16],
+    font_start: usize,
+
+    // Backwards-compat flags
+    copy_vy_while_shifting: bool,
+    increment_index_during_save_load: bool,
+    index_overflow_flag: bool,
+}
+impl Default for Chip8Config {
+    fn default() -> Self {
+        Self {
+            instructions_per_second: Self::INSTRUCTIONS_PER_SECOND,
+            program_start: Self::PROGRAM_START,
+            default_font: Self::DEFAULT_FONT,
+            font_start: Self::FONT_START,
+            copy_vy_while_shifting: false,
+            increment_index_during_save_load: false,
+            index_overflow_flag: false,
+        }
+    }
+}
+
+impl Chip8Config {
+    pub const INSTRUCTIONS_PER_SECOND: usize = 700;
     pub const PROGRAM_START: usize = 0x200;
     /// In bytes
     pub const FONT_CHAR_SIZE: usize = 5;
@@ -61,17 +84,23 @@ impl Chip8 {
         0xF0, 0x80, 0xF0, 0x80, 0x80, // F
     ];
     pub const FONT_START: usize = 0x050;
-    pub const INSTRUCTIONS_PER_SECOND: usize = 700;
+}
 
-    pub fn new() -> Self {
+impl Chip8 {
+    pub const WIDTH: usize = 64;
+    pub const HEIGHT: usize = 32;
+    /// In bytes
+    pub const MEMORY_SIZE: usize = 4096;
+
+    pub fn new(config: Chip8Config) -> Self {
         let mut memory = [0; Self::MEMORY_SIZE];
-        memory[Self::FONT_START..Self::FONT_START + Self::DEFAULT_FONT.len()]
-            .copy_from_slice(&Self::DEFAULT_FONT);
+        memory[config.font_start..config.font_start + config.default_font.len()]
+            .copy_from_slice(&config.default_font);
         assert!(memory[0x050] == 0xF0);
         Self {
             framebuffer: [false; Self::WIDTH * Self::HEIGHT],
             keys: [false; 16],
-            pc: Self::PROGRAM_START,
+            pc: config.program_start,
             memory,
             index_reg: 0,
             stack: Vec::new(),
@@ -79,12 +108,17 @@ impl Chip8 {
             sound_timer: 0,
             variable_reg: [0; 16],
             ds_timer: Timer::new(1.0),
-            program_timer: Timer::new(1.0 / Self::INSTRUCTIONS_PER_SECOND as f32),
+            program_timer: Timer::new(1.0 / config.instructions_per_second as f32),
+            config,
         }
     }
+
     pub fn set_program(&mut self, program: &[u8]) {
-        self.memory[Self::PROGRAM_START..Self::PROGRAM_START + program.len()]
+        self.memory[self.config.program_start..self.config.program_start + program.len()]
             .copy_from_slice(program);
+    }
+    pub fn should_play_sound(&self) -> bool {
+        self.sound_timer > 0
     }
 
     /// `delta` is in seconds
@@ -215,9 +249,16 @@ impl Chip8 {
                         0x6 => {
                             // INST 8XY6 : vx >>= vy
                             self.variable_reg[0xF] = *vx & 0b1;
-                            let vx = &mut self.variable_reg[nibble_1 as usize];
-                            // LEGACY : Old interpreters would copy vy into vx before shifting
-                            *vx >>= 1;
+                            if self.config.copy_vy_while_shifting {
+                                // LEGACY : Old interpreters would copy vy into vx before shifting
+                                let vy = self.variable_reg[nibble_2 as usize];
+                                let vx = &mut self.variable_reg[nibble_1 as usize];
+                                *vx = vy;
+                                *vx >>= 1;
+                            } else {
+                                let vx = &mut self.variable_reg[nibble_1 as usize];
+                                *vx >>= 1;
+                            }
                         }
                         0x7 => {
                             // INST 8XY7 : vx = vy - vx
@@ -226,9 +267,16 @@ impl Chip8 {
                         0xE => {
                             // INST 8XYE : vx <<= vy
                             self.variable_reg[0xF] = *vx & 0b10000000;
-                            let vx = &mut self.variable_reg[nibble_1 as usize];
-                            // LEGACY : Old interpreters would copy vy into vx before shifting
-                            *vx <<= 1;
+                            if self.config.copy_vy_while_shifting {
+                                // LEGACY : Old interpreters would copy vy into vx before shifting
+                                let vy = self.variable_reg[nibble_2 as usize];
+                                let vx = &mut self.variable_reg[nibble_1 as usize];
+                                *vx = vy;
+                                *vx <<= 1;
+                            } else {
+                                let vx = &mut self.variable_reg[nibble_1 as usize];
+                                *vx <<= 1;
+                            }
                         }
                         _ => {
                             eprintln!(
@@ -352,9 +400,14 @@ impl Chip8 {
                             self.sound_timer = *vx;
                         } else if nibble_3 == 0xE {
                             // INST FX1E : index_reg += vx
-                            // LEGACY : The interpreter for Amiga would treat index_reg going above 0x0FFF as a special overflow and would set vf := 1 in that case
-                            // The game called "Spacefight 2091!" relies on this.
                             self.index_reg += *vx as u16;
+                            if self.config.index_overflow_flag {
+                                // LEGACY : The interpreter for Amiga would treat index_reg going above 0x0FFF as a special overflow and would set vf := 1 in that case
+                                // The game called "Spacefight 2091!" relies on this.
+                                if self.index_reg > 0x0FFF {
+                                    self.variable_reg[0xF] = 1;
+                                }
+                            }
                         } else {
                             eprintln!(
                                 "[ERROR] Unknown instruction: {:0>2X}{:0>2X}{:0>2X}{:0>2X}",
@@ -365,7 +418,8 @@ impl Chip8 {
                         // INST FX29 : index_reg := hex vx
                         let vx = self.variable_reg[nibble_1 as usize];
                         let ch = (vx & 0b00001111) as u16;
-                        self.index_reg = Self::FONT_START as u16 + ch * Self::FONT_CHAR_SIZE as u16;
+                        self.index_reg =
+                            self.config.font_start as u16 + ch * Chip8Config::FONT_CHAR_SIZE as u16;
                     } else if nibble_2 == 0x3 && nibble_3 == 0x3 {
                         // INST FX33 : bcd vx // Decode vx into binary-coded decimal
                         let vx = self.variable_reg[nibble_1 as usize];
@@ -374,15 +428,25 @@ impl Chip8 {
                         self.memory[self.index_reg as usize + 2] = (vx % 100) % 10;
                     } else if nibble_2 == 0x5 && nibble_3 == 0x5 {
                         // INST FX55 : save vx // Save v0-vx to index_reg through (index_reg+x)
-                        // LEGACY : Old interpreters used to increment the index register along the way.
                         for x in 0..=nibble_1 as usize {
-                            self.memory[self.index_reg as usize + x] = self.variable_reg[x];
+                            if self.config.increment_index_during_save_load {
+                                // LEGACY : Old interpreters used to increment the index register along the way.
+                                self.memory[self.index_reg as usize] = self.variable_reg[x];
+                                self.index_reg += 1;
+                            } else {
+                                self.memory[self.index_reg as usize + x] = self.variable_reg[x];
+                            }
                         }
                     } else if nibble_2 == 0x6 && nibble_3 == 0x5 {
                         // INST FX65 : load vx // Load v0-vx from index_reg through (index_reg+x)
-                        // LEGACY : Old interpreters used to increment the index register along the way.
                         for x in 0..=nibble_1 as usize {
-                            self.variable_reg[x] = self.memory[self.index_reg as usize + x];
+                            if self.config.increment_index_during_save_load {
+                                // LEGACY : Old interpreters used to increment the index register along the way.
+                                self.variable_reg[x] = self.memory[self.index_reg as usize];
+                                self.index_reg += 1;
+                            } else {
+                                self.variable_reg[x] = self.memory[self.index_reg as usize + x];
+                            }
                         }
                     } else {
                         eprintln!(
