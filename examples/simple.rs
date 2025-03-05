@@ -63,24 +63,19 @@ fn main() -> Result<(), Chip8Error> {
         };
         let (width, height) = window.get_size();
         buf.resize(width * height, 0);
-        let keypress = {
-            let mut res = None;
-            for (key, code) in keys {
-                if window.is_key_down(key) {
-                    res = Some(code);
-                    chip8.keys[code as usize] = true;
-                } else {
-                    chip8.keys[code as usize] = false;
-                }
+        for (key, code) in keys {
+            if window.is_key_down(key) {
+                chip8.press(code)
+            } else {
+                chip8.release(code)
             }
-            res
-        };
+        }
 
         if chip8.should_play_sound() {
             // TODO: Play sound here
         }
 
-        chip8.frame(delta, keypress, || {
+        chip8.update(delta, || {
             (UNIX_EPOCH.elapsed().unwrap().as_micros() % 255) as u8
         })?;
 

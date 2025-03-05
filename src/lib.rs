@@ -126,7 +126,7 @@ impl Chip8Config {
 
 pub struct Chip8 {
     pub framebuffer: [bool; Self::WIDTH * Self::HEIGHT],
-    pub keys: [bool; 16],
+    keys: [bool; 16],
     pc: usize,
     memory: [u8; Self::MEMORY_SIZE],
     index_reg: u16,
@@ -138,6 +138,7 @@ pub struct Chip8 {
     program_timer: Timer,
     variable_reg: [u8; 16],
     config: Chip8Config,
+    keypress_this_frame: Option<u8>,
 }
 
 impl Chip8 {
@@ -167,6 +168,7 @@ impl Chip8 {
             ds_timer: Timer::new(1_000_000 / 60),
             program_timer: Timer::new(1_000_000 / config.instructions_per_second as u128),
             config,
+            keypress_this_frame: None,
         }
     }
 
@@ -178,16 +180,22 @@ impl Chip8 {
         self.sound_timer > 0
     }
 
+    pub fn press(&mut self, key: u8) {
+        self.keys[key as usize] = true;
+        self.keypress_this_frame = Some(key);
+    }
+
+    pub fn release(&mut self, key: u8) {
+        self.keys[key as usize] = false;
+    }
+
     /// `delta` is in microseconds
-    pub fn frame(
+    pub fn update(
         &mut self,
         delta: u128,
-        keypress: Option<u8>,
         random_source: impl FnOnce() -> u8,
     ) -> Result<(), Chip8Error> {
-        if let Some(keypress) = keypress {
-            self.keys[keypress as usize] = true;
-        }
+        let keypress = self.keypress_this_frame.take();
         if self.ds_timer.check(delta) {
             if self.delay_timer > 0 {
                 self.delay_timer -= 1;
