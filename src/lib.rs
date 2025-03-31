@@ -153,7 +153,7 @@ impl Chip8 {
         let mut memory = [0; Self::MEMORY_SIZE];
         memory[config.font_start..config.font_start + config.font.len()]
             .copy_from_slice(&config.font);
-        assert!(memory[0x050] == 0xF0);
+        // assert!(memory[0x050] == 0xF0); // Assertion for default config
         Self {
             framebuffer: [false; Self::WIDTH * Self::HEIGHT],
             keys: [false; 16],
